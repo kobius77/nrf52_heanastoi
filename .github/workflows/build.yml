@@ -9,7 +9,8 @@ jobs:
   build:
     runs-on: ubuntu-latest
     container:
-      image: nordicplayground/nrfconnect-sdk:v2.5-branch
+      image: zephyrprojectrtos/ci:latest
+      options: --user root
 
     steps:
       - name: Checkout Code
@@ -17,29 +18,47 @@ jobs:
         with:
           path: my-app
 
-      - name: Build Firmware
+      - name: Initialize & Build
         working-directory: my-app
         env:
-          # We explicitly tell CMake where Zephyr is (pre-installed in this image)
-          # The path /opt/ncs/zephyr is standard for the v2.5 image
-          ZEPHYR_BASE: /opt/ncs/zephyr
+          # This tells the build system to use the cross-compiler pre-installed in the image
+          ZEPHYR_TOOLCHAIN_VARIANT: zephyr
+          ZEPHYR_SDK_INSTALL_DIR: /opt/toolchains/zephyr-sdk-0.16.8
         run: |
-          echo "=== DEBUG: Checking Environment ==="
-          ls -F /opt/ncs/ || echo "SDK not found at /opt/ncs"
+          echo "=== STEP 1: Setting up Workspace ==="
+          # Initialize a new West workspace in the current folder
+          # We use --mr v3.6.0 to pin a stable Zephyr version (Reliability!)
+          west init -l . --mf west.yml || west init -l .
           
-          echo "=== STEP 1: Installing West ==="
-          # We install west manually to guarantee it exists in the path
-          pip3 install west
-          
-          echo "=== STEP 2: Building Firmware ==="
-          # We build directly using the pre-installed SDK. 
-          # -p always : Forces a clean build
-          # -b nice_nano_v2 : The board name
-          # . : The source directory (current folder)
-          west build -p always -b nice_nano_v2 .
+          # If init failed to fetch manifest (common in empty repos), we initialize a generic one
+          if [ ! -d ".west" ]; then
+             echo "Initializing fresh Zephyr..."
+             cd ..
+             west init workspace
+             mv my-app workspace/app
+             cd workspace
+          fi
+
+          echo "=== STEP 2: Fetching Zephyr OS (This takes ~2 mins) ==="
+          # We update to get the actual Zephyr Source Code
+          west update --narrow -o=--depth=1
+
+          echo "=== STEP 3: Building Firmware ==="
+          # Zephyr needs to know where the modules are. 
+          # We build pointing to the app directory.
+          # Note: If we moved the folder in step 1, we adjust paths.
+          if [ -d "app" ]; then
+             west build -p always -b nice_nano_v2 app
+          else
+             west build -p always -b nice_nano_v2 .
+          fi
 
       - name: Archive Firmware
         uses: actions/upload-artifact@v4
         with:
           name: bthome_sensor_firmware
-          path: my-app/build/zephyr/zephyr.uf2
+          # The build output is usually in build/zephyr/
+          # If we moved folders, it might be in workspace/build/zephyr
+          path: |
+            **/build/zephyr/zephyr.uf2
+            **/zephyr.uf2
