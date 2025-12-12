@@ -9,7 +9,7 @@ jobs:
   build:
     runs-on: ubuntu-latest
     container:
-      image: nordicplayground/nrfconnect-sdk:v2.7-branch
+      image: nordicplayground/nrfconnect-sdk:v2.5-branch
 
     steps:
       - name: Checkout Code
@@ -19,25 +19,24 @@ jobs:
 
       - name: Build Firmware
         working-directory: my-app
-        # We manually install 'west' to ensure it is found in the path.
-        # Then we initialize the workspace and build.
+        env:
+          # We explicitly tell CMake where Zephyr is (pre-installed in this image)
+          # The path /opt/ncs/zephyr is standard for the v2.5 image
+          ZEPHYR_BASE: /opt/ncs/zephyr
         run: |
-          # 1. Force install west to fix "not found" error
+          echo "=== DEBUG: Checking Environment ==="
+          ls -F /opt/ncs/ || echo "SDK not found at /opt/ncs"
+          
+          echo "=== STEP 1: Installing West ==="
+          # We install west manually to guarantee it exists in the path
           pip3 install west
-
-          # 2. Initialize the workspace (links your code to the build system)
-          west init -l .
-
-          # 3. Fetch the Zephyr/Nordic dependencies
-          # We use --narrow to speed up the download
-          west update --narrow -o=--depth=1
-
-          # 4. Export the CMake package so the build system finds Zephyr
-          west zephyr-export
-
-          # 5. Build for the SuperMini (nice_nano_v2)
-          # The -p flag forces a pristine build (cleans old cache)
-          west build -b nice_nano_v2 . -p
+          
+          echo "=== STEP 2: Building Firmware ==="
+          # We build directly using the pre-installed SDK. 
+          # -p always : Forces a clean build
+          # -b nice_nano_v2 : The board name
+          # . : The source directory (current folder)
+          west build -p always -b nice_nano_v2 .
 
       - name: Archive Firmware
         uses: actions/upload-artifact@v4
